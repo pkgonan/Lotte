@@ -1,0 +1,157 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+var app = require('../app');
+var debug = require('debug')('lotteproject:server');
+var http = require('http');
+var JSON = require('json3');
+var http = require('http');
+var _ = require('lodash');
+var mysql = require('mysql');
+var WebSocketServer = require('websocket').server;
+var excelbuilder = require('msexcel-builder');
+var fs  = require('fs');
+
+var count = 0;
+var clients = [ [] ];
+var word = 0 ;
+var id = [ ];
+var workbook;
+var sheet1;
+
+/**
+ * web server port set up
+ */
+var WebServerPort = 3303;
+app.listen(WebServerPort, function() {  //web server 3000 port
+    console.log('Web Server Start - Port : ' + WebServerPort);
+});
+
+/**
+ * Database Connection
+ */
+var connection = mysql.createConnection({
+    host     : 'localhost',
+    user     : 'root',
+    password : '0000',
+    database : 'kim'
+});
+
+connection.connect();
+
+connection.query('SELECT * from datas', function(err, rows) {
+    if (err) throw err;
+
+    _.each(rows, function(row) {
+        console.log('sheet : ' + row.sheet + '   position : ' + row.position + '   cell : ' + row.cell);
+    });
+    id[word] = 0;   // initialize
+});
+
+/**
+ * Create HTTP server.
+ */
+var server = http.createServer(function (req, res) {  //요청 왔을때
+    console.log('Received request for ' + req.url);
+    res.writeHead(404);
+    res.end();
+});
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+var WebSocketServerPort = 9000;
+server.listen(WebSocketServerPort, function () {
+    console.log('Web Socket Server start - port : ' + WebSocketServerPort);
+});
+
+wsServer = new WebSocketServer({
+    httpServer: server,
+    autoAcceptConnections: false
+});
+
+var create_excel = function(word, i, j, cell){
+// Create a new workbook file in current working-path
+    var file = word + ".xlsx";
+
+    if (!fs.existsSync('./' + file)) {
+        workbook = excelbuilder.createWorkbook('./', file);
+
+        // Create a new worksheet with 10 columns and 12 rows
+        sheet1 = workbook.createSheet('sheet1', 26, 359);
+
+        sheet1.set(i+1, j, cell);
+    }
+    else {
+        sheet1.set(i+1, j, cell);
+    }
+
+    // Save it
+    workbook.save(function(ok){
+        if (!ok)
+            workbook.cancel();
+        else
+            console.log('congratulations, your workbook created');
+    });
+}
+
+// DATA Format : [ { signal   :     0 } ,     -    signal   : 0 or 1 ( ex : 0 : first login ,  ex : 1 : else )
+//                 { menu     :     1 } ,     -    menu     : 1 or 2 menu selection ( ex : 1 : make new word , ex : 2 : read word )
+//                 { word     : '제목'} ,     -    word     : word name ( ex : 첫번째 문서 )
+//                 { sheet    :     1 } ,     -    sheet    : sheet number  (1,2,3...)
+//                 { position :   'A4'} ,     -    position : cell position ( ex : A4 , B3 )
+//                 { cell     :   'HI'} ] ;   -    cell     : cell value ( ex : "hello" )
+
+wsServer.on('request', function (request) {
+    var connection = request.accept('echo-protocol', request.origin);  // 커넥션 ACCEPT
+    connection.on('message', function (message) {   //메세지 수신 및 브로드캐스트
+        //메세지를 잘라서 분류하기
+
+        if (message.type === 'utf8') {
+            console.log('Received message: ' + message.utf8Data);
+            var temp = JSON.parse(message.utf8Data);
+            console.log('signal : ' + temp.signal + ' menu : ' + temp.menu + ' word : ' + temp.word + ' sheet : ' + temp.sheet + '   position : ' + temp.position + '   cell : ' + temp.cell);
+            if(temp.signal == 0) {  // first join message
+                //console.log("word : " + word + "id[word] : " +  id[word]);
+                console.log((new Date()) + ' Connection accepted [' + word + '][' + id + ']');
+                clients[word][ id[word] ] = connection;
+                id[word]++;
+                console.log(id);
+            }
+            else {
+                var firstNum = processFirst(temp.position);
+                var secondNum = processSecond(temp.position);
+                console.log(firstNum);
+                console.log(temp.cell);
+                create_excel(temp.word, firstNum, secondNum, temp.cell);
+                console.log("clients count : " + clients[word]);
+                for(var i in clients[word]){
+                    console.log("Sending " + i + "clients " + message.utf8Data);
+                    clients[word][i].sendUTF(message.utf8Data);
+                }
+            }
+        }
+        else if (message.type === 'binary') {
+            connection.sendBytes(message.binaryData);
+        }
+    });
+
+    processFirst = function(exp) {
+        var res = exp.substring(0,1);
+        var result = res.charCodeAt(0)-65;
+        return result;
+    };
+
+    processSecond = function(exp) {
+        var res = exp.substring(1);
+        var result = parseInt(res);
+        return result;
+    };
+
+    connection.on('close', function(reasonCode, description) {
+        delete clients[word][ --id[word] ];
+        console.log((new Date()) + ' Peer ' + connection.remoteAddress + ' disconnected.');
+    });
+});

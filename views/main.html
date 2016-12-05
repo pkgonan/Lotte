@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]>      <html lang="ko" class="no-js lt-ie9 lt-ie8 lt-ie7"> <![endif]-->
+<!--[if IE 7]>         <html lang="ko" class="no-js lt-ie9 lt-ie8"> <![endif]-->
+<!--[if IE 8]>         <html lang="ko" class="no-js lt-ie9"> <![endif]-->
+<!--[if gt IE 8]><!--> <html lang="ko" class="no-js"> <!--<![endif]-->
+<head>
+    <meta charset="UTF-8">
+    <title>Google Spreadsheet</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.5.7/angular.min.js"></script>
+    <style>
+        body { font-family: sans-serif; }
+        .output, input {
+            font-size: 10pt;
+            position: absolute;
+            height: 1.2em;
+            width: 50pt;
+            height: 16pt;
+            overflow: hidden;
+            padding-left: 4pt;
+        }
+        input { border: none;}
+        .output {
+            background: white;
+            pointer-events: none;
+            padding-top: 2pt;
+            height: 14pt;
+        }
+        input:focus + .output { display: none; }
+
+        table { border-collapse: collapse; }
+        td > div {
+            width: 55pt;
+            height: 16pt;
+        }
+        td { border: 1px solid #EEE; }
+        .column-label  > td, .row-label {
+            text-align: center;
+            background: #EEE;
+        }
+        .row-label { width: 2em; }
+    </style>
+</head>
+<body>
+<h1>협업 도구</h1>
+<h3>동시에 다수의 사용자가 하나의 엑셀파일을 만들 수 있다</h3>
+<div ng-app="myApp" ng-controller="sheet">
+    <table>
+        <tr class="column-label">
+            <td></td>
+            <td ng-repeat="column in columns track by $index">{{column}}</td>
+        </tr>
+        <tr ng-repeat="row in rows track by $index">
+            <td class="row-label">{{row}}</td>
+            <td ng-repeat="column in columns track by $index">
+                <div>
+                    <input ng-model="cells[column+row]" ng-change="compute(column+row)"/>
+                </div>
+            </td>
+        </tr>
+    </table>
+</div>
+<button ng-click="loadMore()">Click</button>
+
+
+<script>
+    var app = angular.module("myApp" , []);
+    app.controller("sheet" , function($scope, $parse) {
+        $scope.columns = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
+        $scope.rows = [];
+        $scope.cells = [];
+        $scope.totalDisplayed = 200;
+        $scope.cellvalue;
+        $scope.cellposition;
+        $scope.loadMore = function() {
+            $scope.totalDisplayed += 200;
+            alert($scope.totalDisplayed);
+        };
+        var rowtemp= [];
+
+        for(i=0; i<$scope.totalDisplayed; i++)
+            rowtemp[i] = i+1;
+        $scope.rows = rowtemp;
+
+        process = function(exp) {
+            var res = exp.substring(1);
+            return res.replace(/[A-Z]\d+/g, function(ref) {
+                return 'compute("' + ref + '")';
+            });
+        };
+        $scope.compute = function(cell) {
+            var exp = $scope.cells[cell];
+            $scope.cellposition = cell;
+            $scope.cellvalue = exp;
+            console.log("Position : " + cell + " value : " + exp);
+            console.log($scope.cells);
+
+            senddata(1 , 0 , "first word" , 1 , getcellposition() , getcellvalue());
+
+            if (exp){
+                if ((exp.substring(0,1) == "=") || (exp.substring(0,1) == "+")){
+                    return $parse(process(exp))($scope);
+                }else{
+                    var value;
+                    if (!isNaN(parseFloat(exp))){
+                        value = parseFloat(exp);
+                    }
+                    return value;
+                }
+            }
+        };
+        getcellposition = function(){
+            console.log("this is : " + $scope.cellposition);
+            return $scope.cellposition;
+        }
+
+        getcellvalue = function(){
+            return $scope.cellvalue;
+        }
+
+        insertcells = function(position , cell){  //insert into cell   ex) cells[A4] = "hi";
+            $scope.cells[position] = cell;
+            $scope.$apply();
+            console.log("$scope.cells : " + $scope.cells[position]);
+        }
+    });
+
+    if ('WebSocket' in window) {
+        // localhost�� �����Ѵ�.
+        var wSocket = new WebSocket('ws://127.0.0.1:9000' , 'echo-protocol');
+        var DATA = { } ;
+        
+// DATA Format : [ { menu     :     1 } ,     -    menu     : 1 or 2 or 3 menu selection ( ex : 1 : make new word , ex : 2 : read word 3 : pass )
+//                 { word     : '��'} ,     -    word     : word name
+//                 { sheet    :     1 } ,     -    sheet    : sheet number  (1,2,3...)
+//                 { position :   'A4'} ,     -    position : cell position ( ex : A4 , B3 )
+//                 { cell     :   'HI'} ] ;   -    cell     : cell value ( ex : "hello" )
+
+        wSocket.onmessage = function (message) {  //���� ���� ���� ����
+            console.log("received message by server : " + message.data);
+            var jsonmessage = JSON.parse(message.data);
+            console.log("signal : " + jsonmessage.signal + " menu : " + jsonmessage.menu + " word : " + jsonmessage.word + " sheet : " + jsonmessage.sheet + " position : " + jsonmessage.position + " cell : " + jsonmessage.cell);
+
+            insertcells(jsonmessage.position , jsonmessage.cell);
+        }
+
+        wSocket.onopen = function (){
+            senddata(0 , 0 , 0 , 0 , 0 , 0);
+        }
+        wSocket.onclose = function (e) {
+        }
+
+        function senddata(signal, menu, word, sheet, position, cell) { //������ �����͸� �����ϴ� �޼��� //��� ���� ���
+            DATA = { "signal" : signal , "menu" : menu , "word" : word , "sheet" : sheet , "position" : position , "cell" : cell } ;
+       
+            var temp = JSON.stringify(DATA);
+            console.log("sending data : " + temp);
+
+            wSocket.send(temp);
+        }
+    }
+    else
+          $('#status').text('WebSocket not supported.');
+       </script>
+
+    Status: <span id="status"></span><br /><br />
+    Messages: <ul id="messages"></ul>
+</body>
+</html>
